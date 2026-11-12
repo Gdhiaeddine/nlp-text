@@ -1,0 +1,20 @@
+,,,dev_f1,dev_f1,test_f1,test_f1,train_s,train_s,params_M,params_M,latency_ms_per_abstract,latency_ms_per_abstract,n_seeds
+,,,mean,std,mean,std,mean,std,mean,std,mean,std,
+model,window,frac,,,,,,,,,,,
+BERT (hierarchical),full,1.0,0.7873,,0.7534,,477.8171,,111.5861,,506.4165,,1
+BERT (sentence),,1.0,0.7359,,0.7038,,418.7906,,109.4861,,499.9073,,1
+BiLSTM,,1.0,0.2662,,0.2696,,4.9388,,0.7244,,2.4438,,1
+BioBERT (hierarchical),full,0.01,0.1028,,0.0904,,37.428,,110.4141,,505.9626,,1
+BioBERT (hierarchical),full,0.05,0.1909,,0.1851,,50.1257,,110.4141,,498.5337,,1
+BioBERT (hierarchical),full,0.1,0.1226,,0.1177,,79.8999,,110.4141,,505.414,,1
+BioBERT (hierarchical),full,1.0,0.8462,,0.7953,,451.3146,,110.4141,,503.6353,,1
+BioBERT (hierarchical),w0,1.0,0.8176,,0.7514,,434.6161,,110.4141,,477.6811,,1
+BioBERT (hierarchical),w1,1.0,0.842,,0.7655,,453.1836,,110.4141,,514.68,,1
+BioBERT (hierarchical),w2,1.0,0.8413,,0.772,,440.8782,,110.4141,,505.5811,,1
+BioBERT (hierarchical),w3,1.0,0.8584,,0.785,,454.9786,,110.4141,,503.7717,,1
+BioBERT (sentence),,0.01,0.1222,,0.1473,,36.6505,,108.3141,,502.8943,,1
+BioBERT (sentence),,0.05,0.2616,,0.2502,,50.021,,108.3141,,506.1797,,1
+BioBERT (sentence),,0.1,0.297,,0.3039,,80.1494,,108.3141,,496.9107,,1
+BioBERT (sentence),,1.0,0.7941,,0.7666,,455.7781,,108.3141,,513.6344,,1
+Position-only,,1.0,0.6275,,0.6258,,1.9117,,,,,,1
+TF-IDF + LR,,1.0,0.7669,,0.7604,,43.6194,,,,,,1
