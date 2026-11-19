@@ -82,6 +82,19 @@ SAMPLE_ABSTRACTS = {
         "Peptide administration significantly reduced infarct size by 38% and preserved left ventricular ejection fraction. "
         "Mechanistically, the compound inhibited mitochondrial ROS production and suppressed inflammatory cytokine release. "
         "Targeting this mitochondrial pathway may offer a promising therapeutic strategy for acute coronary syndromes."
+    ),
+    "Mammographie & Deep Learning (FR)": (
+        "Le cancer du sein représente l'un des cancers les plus fréquemment diagnostiqués chez les femmes dans le monde. "
+        "Le dépistage précoce joue un rôle essentiel dans l'amélioration des chances de traitement et de survie des patientes. "
+        "Cependant, l'interprétation des mammographies peut être complexe et dépendre de l'expérience du radiologue. "
+        "L'objectif de cette étude est d'évaluer les performances des modèles de Deep Learning pour la détection automatique des lésions mammaires à partir d'images de mammographie. "
+        "Nous avons utilisé un ensemble de 8 000 images de mammographie provenant de plusieurs établissements hospitaliers. "
+        "Les images ont été prétraitées et annotées par des radiologues spécialisés. "
+        "Un réseau de neurones convolutifs (CNN) et une architecture ResNet ont été entraînés pour distinguer les lésions bénignes des lésions malignes. "
+        "Le modèle ResNet a obtenu une AUC de 0,94 et une sensibilité de 91 %, surpassant le modèle CNN classique. "
+        "Les résultats montrent également que l'utilisation de techniques d'augmentation des données améliore la capacité de généralisation du modèle. "
+        "Cette étude démontre le potentiel du Deep Learning pour assister l'analyse des mammographies. "
+        "Néanmoins, des validations prospectives sur des populations plus importantes sont nécessaires avant toute utilisation clinique."
     )
 }
 
@@ -132,12 +145,16 @@ with st.sidebar:
     # Load precision configuration for display
     v3_cfg = load_precision_config()
     cfg_th = v3_cfg.get('th', {})
+    if selected_model_key == 'transformer':
+        active_th = {'BACKGROUND': 0.50, 'OBJECTIVE': 0.50, 'METHODS': 0.50, 'RESULTS': 0.50, 'CONCLUSIONS': 0.50}
+    else:
+        active_th = cfg_th
 
     if use_calibrated_th:
         with st.expander("📌 View v3 (1) Class Thresholds", expanded=False):
             st.caption("Sentences with confidence below these role-specific thresholds are labeled `NEEDS REVIEW`:")
             for lab in LABELS:
-                val = cfg_th.get(lab, 0.5)
+                val = active_th.get(lab, 0.5)
                 st.write(f"- **{lab}**: `{val * 100:.1f}%`")
         threshold = 0.60
     else:
@@ -203,7 +220,7 @@ main_tabs = st.tabs(["⚡ Live Abstract Structurer", "📊 Models Benchmark & Em
 with main_tabs[0]:
     # Preset buttons
     st.markdown("##### Load an example abstract:")
-    col_ex1, col_ex2, col_ex3 = st.columns(3)
+    col_ex1, col_ex2, col_ex3, col_ex4 = st.columns(4)
     if col_ex1.button("📋 Clinical RCT (Depression)", key="btn_example_depression"):
         st.session_state['abstract_input'] = SAMPLE_ABSTRACTS["Clinical RCT (Depression Intervention)"]
         st.session_state.pop('last_result', None)
@@ -214,6 +231,10 @@ with main_tabs[0]:
         st.rerun()
     if col_ex3.button("🧪 Unstructured Preclinical", key="btn_example_preclinical"):
         st.session_state['abstract_input'] = SAMPLE_ABSTRACTS["Unstructured Real-World Sample"]
+        st.session_state.pop('last_result', None)
+        st.rerun()
+    if col_ex4.button("🎗️ Mammographie (FR)", key="btn_example_mammo"):
+        st.session_state['abstract_input'] = SAMPLE_ABSTRACTS["Mammographie & Deep Learning (FR)"]
         st.session_state.pop('last_result', None)
         st.rerun()
 

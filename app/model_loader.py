@@ -34,12 +34,13 @@ def _load_transformer_model():
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
     model_id = 'gubartz/cls_scibert_pubmed_rct'
+    tok_id = 'allenai/scibert_scivocab_uncased'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     try:
-        tok = AutoTokenizer.from_pretrained(model_id, local_files_only=True)
+        tok = AutoTokenizer.from_pretrained(tok_id, local_files_only=True)
         model = AutoModelForSequenceClassification.from_pretrained(model_id, local_files_only=True)
     except Exception:
-        tok = AutoTokenizer.from_pretrained(model_id)
+        tok = AutoTokenizer.from_pretrained(tok_id)
         model = AutoModelForSequenceClassification.from_pretrained(model_id)
 
     model.to(device)

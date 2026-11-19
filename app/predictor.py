@@ -13,6 +13,9 @@ import os
 import sys
 from pathlib import Path
 import re
+import urllib.parse
+import urllib.request
+import json
 from typing import Dict, List, Any, Optional
 import numpy as np
 import pandas as pd
@@ -64,6 +67,26 @@ def normalize_numbers(text: str) -> str:
     """
     return re.sub(r'\d+', '@', str(text))
 
+def is_likely_french(text: str) -> bool:
+    """Detect if input text contains characteristic French stopwords or accented characters."""
+    french_indicators = [' le ', ' la ', ' les ', ' des ', ' du ', ' dans ', ' est ', ' sont ', ' une ', ' un ', ' pour ', ' été ', ' par ', ' cette ']
+    low = ' ' + text.lower() + ' '
+    return any(w in low for w in french_indicators) or any(c in text for c in 'éèêàâôûùçîï')
+
+def translate_to_english(sentences: List[str]) -> List[str]:
+    """Translate sentences to English for the biomedical model (trained on English PubMed RCT)."""
+    translated = []
+    for s in sentences:
+        try:
+            url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=' + urllib.parse.quote(s)
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            resp = urllib.request.urlopen(req, timeout=5)
+            data = json.loads(resp.read().decode('utf-8'))
+            translated.append(''.join([part[0] for part in data[0]]))
+        except Exception:
+            translated.append(s)
+    return translated
+
 def predict_abstract(
     text: str,
     threshold: float = 0.60,
@@ -91,7 +114,13 @@ def predict_abstract(
 
     # 1. Base Model Inference
     model_runner, model_info = load_active_model(model_key=model_key)
-    normalized_sents = [normalize_numbers(s) for s in sentences]
+    # Detect French and translate for model inference if needed (BioBERT / SciBERT trained on English)
+    if any(is_likely_french(s) for s in sentences):
+        eval_sentences = translate_to_english(sentences)
+    else:
+        eval_sentences = sentences
+
+    normalized_sents = [normalize_numbers(s) for s in eval_sentences]
     raw_probs = model_runner(normalized_sents)  # shape: (N, 5)
 
     # 2. Load medstruct_nlp_v3 (1) Precision Config
@@ -107,14 +136,18 @@ def predict_abstract(
     # Step 2b: Order-Aware Markov Sequence Decoding from v3 (1)
     if use_v3_decoding and 'logT' in cfg and 'logS' in cfg and 'logP' in cfg:
         abstract_ids = np.zeros(len(sentences), dtype=int)
+        # For neural transformers, use gentle smoothing (lam=0.25, beta=0.0) so Markov sequence priors
+        # do not override high-confidence Objective predictions on short/truncated introductory sections.
+        lam = 0.25 if model_key == 'transformer' else cfg.get('lam', 0.75)
+        beta = 0.0 if model_key == 'transformer' else cfg.get('beta', 0.5)
         marginals = posterior_marginals(
             calibrated_probs,
             abstract_ids=abstract_ids,
             logT=cfg['logT'],
             logStart=cfg['logS'],
             logPrior=cfg['logP'],
-            lam=cfg.get('lam', 0.75),
-            beta=cfg.get('beta', 0.5)
+            lam=lam,
+            beta=beta
         )
     else:
         marginals = calibrated_probs
@@ -130,7 +163,12 @@ def predict_abstract(
 
     # Step 2c: Calibrated Abstention Thresholds from v3 (1)
     if use_calibrated_thresholds and 'th' in cfg:
-        th = cfg['th']
+        if model_key == 'transformer':
+            # For deep contextual transformers, calibrated thresholds for high precision are ~0.50.
+            # The JSON file's 0.9919 threshold was specifically derived for the TF-IDF baseline and must not be applied to neural models.
+            th = {'BACKGROUND': 0.50, 'OBJECTIVE': 0.50, 'METHODS': 0.50, 'RESULTS': 0.50, 'CONCLUSIONS': 0.50}
+        else:
+            th = cfg['th']
         effective_roles_raw = apply_thresholds(marginals, th)
         # Convert 'UNSURE' to 'NEEDS REVIEW' for consistent UI display
         effective_roles = ['NEEDS REVIEW' if r == 'UNSURE' else r for r in effective_roles_raw]
