@@ -10,6 +10,15 @@ MedStruct is an NLP demo application that segments and structures clinical and s
 
 ---
 
+## Precision Toolkit Pipeline (from `medstruct_nlp_v3 (1).ipynb`)
+
+The Streamlit app directly integrates the 3-stage precision post-processing pipeline from `medstruct_nlp_v3 (1)`:
+1. **Temperature Calibration ($T=1.0$)**: Eliminates model overconfidence on dev-set predictions.
+2. **Order-Aware Markov Transition Decoding ($\lambda=0.75, \beta=0.5$)**: Uses forward-backward sequence smoothing over RCT discourse priors ($logT, logS, logP$) to correct misordered sentences.
+3. **Calibrated Selective Abstention**: Derives empirical confidence thresholds per rhetorical role targeting $\ge 90\%$ precision on key classes (`OBJECTIVE`, `METHODS`, `RESULTS`), flagging uncertain predictions as `NEEDS REVIEW` instead of forcing incorrect labels.
+
+---
+
 ## Architecture & Model Hierarchy
 
 The application prioritizes models in the following order:

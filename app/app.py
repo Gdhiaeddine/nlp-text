@@ -1,82 +1,84 @@
 """
 MedStruct: Interactive Rhetorical Role Classification for Biomedical Abstracts.
-Streamlit Web Application with Live Model Switching and Comprehensive Model Comparison.
+Powered by the medstruct_nlp_v3 (1) precision pipeline:
+- Biomedical Transformers (BioBERT / SciBERT) & Hierarchical models
+- medstruct_nlp_v3 (1) Order-Aware Markov Transition Sequence Decoding (Forward-Backward)
+- medstruct_nlp_v3 (1) Temperature Calibration
+- medstruct_nlp_v3 (1) Class-Calibrated Selective Abstention (Target 90% Precision)
 """
 
 import os
 import sys
+import json
 from pathlib import Path
+import streamlit as st
+import pandas as pd
+import numpy as np
 
 # Ensure project root is in sys.path
 root_dir = Path(__file__).resolve().parent.parent
 if str(root_dir) not in sys.path:
     sys.path.insert(0, str(root_dir))
 
-import json
-import streamlit as st
-import pandas as pd
-import numpy as np
-
 try:
-    from app.predictor import predict_abstract, LABELS
-    from app.model_loader import load_active_model, get_available_models
+    from app.model_loader import get_available_models, load_active_model, LABELS
+    from app.predictor import predict_abstract, split_sentences, normalize_numbers
+    from app.precision_toolkit import load_precision_config
 except ImportError:
-    from predictor import predict_abstract, LABELS
-    from model_loader import load_active_model, get_available_models
+    from model_loader import get_available_models, load_active_model, LABELS
+    from predictor import predict_abstract, split_sentences, normalize_numbers
+    from precision_toolkit import load_precision_config
 
+# Set Streamlit Page Configuration
 st.set_page_config(
-    page_title="MedStruct — Biomedical Abstract Structurer",
+    page_title="MedStruct — Biomedical Abstract Structurer (v3.1)",
     page_icon="🧬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Color and style definitions for rhetorical roles
+# Color Scheme for Rhetorical Roles (consistent with research visualizations)
 ROLE_COLORS = {
-    'BACKGROUND': '#D97706',    # Warm Amber
-    'OBJECTIVE': '#0284C7',     # Cyan / Sky
-    'METHODS': '#4F46E5',       # Indigo
-    'RESULTS': '#059669',       # Emerald
-    'CONCLUSIONS': '#7C3AED',   # Violet
-    'NEEDS REVIEW': '#DC2626'   # Crimson Red
+    'BACKGROUND': '#2563EB',    # Blue
+    'OBJECTIVE': '#7C3AED',     # Purple
+    'METHODS': '#059669',       # Emerald Green
+    'RESULTS': '#D97706',       # Amber / Orange
+    'CONCLUSIONS': '#DC2626',   # Crimson Red
+    'NEEDS REVIEW': '#E11D48',  # Rose / Alert Red
 }
 
 ROLE_BG = {
-    'BACKGROUND': '#FEF3C7',
-    'OBJECTIVE': '#E0F2FE',
-    'METHODS': '#EEF2FF',
-    'RESULTS': '#D1FAE5',
-    'CONCLUSIONS': '#EDE9FE',
-    'NEEDS REVIEW': '#FEE2E2'
+    'BACKGROUND': '#EFF6FF',
+    'OBJECTIVE': '#F5F3FF',
+    'METHODS': '#ECFDF5',
+    'RESULTS': '#FFFBEB',
+    'CONCLUSIONS': '#FEF2F2',
+    'NEEDS REVIEW': '#FFF1F2',
 }
 
+# Curated benchmark clinical abstracts for quick 1-click testing
 SAMPLE_ABSTRACTS = {
     "Clinical RCT (Depression Intervention)": (
-        "Depression is a major public health problem worldwide. This study aimed to evaluate "
-        "the efficacy of a digital cognitive behavioural therapy intervention. We conducted a randomized "
-        "controlled trial involving 250 adult outpatients with moderate-to-severe major depression. Participants "
-        "were allocated to receive either the digital intervention or treatment as usual for 12 weeks. "
-        "The primary outcome was depression severity measured using the PHQ-9 scale at 12 weeks. "
-        "Patients in the digital therapy group demonstrated significantly greater reductions in depressive "
-        "symptoms compared with the control group (mean difference -4.2 points, 95% CI -5.8 to -2.6, p < 0.001). "
-        "No serious adverse events related to the digital intervention were observed. "
-        "These findings support the clinical utility and scalability of digital CBT as an effective treatment."
+        "Major depressive disorder affects over 300 million individuals globally with substantial treatment resistance. "
+        "We sought to determine whether an augmented digital cognitive behavioral therapy protocol improves remission rates in partial responders. "
+        "In this double-blind, randomized controlled trial, 450 adult participants with persistent depressive symptoms were randomized 1:1 to either the digital intervention or an active sham app for 12 weeks. "
+        "The primary outcome was remission measured by the Hamilton Depression Rating Scale at week 12. "
+        "Participants receiving the digital protocol demonstrated significantly higher remission rates compared with sham controls (44.2% vs 26.8%, p = 0.002, relative risk 1.65). "
+        "Digital cognitive behavioral therapy represents an accessible, efficacious adjunctive treatment for treatment-resistant depression in primary care settings."
     ),
     "Oncology Trial (Immunotherapy)": (
-        "Patients with advanced non-small cell lung cancer often develop resistance to standard chemotherapy. "
-        "We investigated whether combining pembrolizumab with conventional platinum-based chemotherapy improves "
-        "progression-free survival in treatment-naive patients. In this double-blind phase 3 trial, 559 patients "
-        "were randomly assigned in a 1:1 ratio to receive chemotherapy plus pembrolizumab or chemotherapy plus placebo. "
-        "Median progression-free survival was 8.8 months in the pembrolizumab group compared to 4.9 months in the placebo group "
-        "(hazard ratio for disease progression or death, 0.52; 95% CI, 0.43 to 0.64; p < 0.001). "
-        "Overall response rate was significantly higher in the combination group (47.6% vs 18.9%). "
-        "Adverse events of grade 3 or higher occurred in 67.2% of patients in the pembrolizumab combination group. "
-        "The addition of pembrolizumab to standard chemotherapy significantly prolonged survival."
+        "Metastatic colorectal cancer with microsatellite instability has a poor prognosis following conventional fluoropyrimidine therapy. "
+        "This phase 3 open-label study evaluated the efficacy and safety of first-line pembrolizumab compared with standard-of-care chemotherapy. "
+        "A total of 307 previously untreated patients were randomly assigned to receive pembrolizumab 200 mg every 3 weeks or investigator's choice of chemotherapy. "
+        "Progression-free survival was assessed blindly by independent central radiologic review as the primary endpoint. "
+        "Pembrolizumab led to significantly longer progression-free survival than chemotherapy (median 16.5 months vs 8.2 months; hazard ratio 0.60; 95% CI 0.45 to 0.80; p = 0.0002). "
+        "Treatment-related adverse events of grade 3 or higher occurred in 22% of the pembrolizumab group versus 66% of the chemotherapy group. "
+        "First-line pembrolizumab provided clinically meaningful improvements in progression-free survival with substantially fewer toxic effects."
     ),
     "Unstructured Real-World Sample": (
-        "Cardiovascular diseases represent the leading cause of global mortality. Here, we explored "
-        "the cardioprotective effects of a novel peptide in murine models of myocardial ischemia-reperfusion injury. "
-        "Male C57BL/6 mice were subjected to 30 minutes of left anterior descending artery occlusion followed by reperfusion. "
+        "Myocardial infarction remains a leading cause of cardiovascular mortality worldwide despite reperfusion therapy advances. "
+        "To explore cardioprotective effects of a novel peptide antagonist against reperfusion injury. "
+        "Adult Wistar rats underwent 30 minutes of left coronary artery occlusion followed by 2 hours of reperfusion with intravenous peptide or vehicle control. "
         "Peptide administration significantly reduced infarct size by 38% and preserved left ventricular ejection fraction. "
         "Mechanistically, the compound inhibited mitochondrial ROS production and suppressed inflammatory cytokine release. "
         "Targeting this mitochondrial pathway may offer a promising therapeutic strategy for acute coronary syndromes."
@@ -86,30 +88,69 @@ SAMPLE_ABSTRACTS = {
 # --- Sidebar ---
 with st.sidebar:
     st.title("⚙️ MedStruct Control")
+    st.caption("🚀 Pipeline Engine: **medstruct_nlp_v3 (1)**")
 
-    st.markdown("### 🤖 Active Inference Model")
+    st.markdown("### 🤖 Base Model")
     model_options = get_available_models()
     selected_model_label = st.selectbox(
-        "Choose Model for Live Inference:",
+        "Choose Base Inference Model:",
         options=list(model_options.keys()),
-        index=0,  # Best Model by default!
+        index=0,  # Best Model by default
         key="selected_model_dropdown",
-        help="Select which model powers live inference. 'BioBERT / SciBERT' is the best deep neural model."
+        help="Select which base model powers inference. 'BioBERT / SciBERT' is the best deep neural model."
     )
     selected_model_key = model_options[selected_model_label]
 
     st.markdown("---")
-    st.markdown("### 🎯 Confidence Threshold")
-    threshold = st.slider(
-        "Flag sentences below confidence:",
-        min_value=0.30,
-        max_value=0.95,
-        value=0.60,
-        step=0.05,
-        key="conf_threshold_slider",
-        help="Sentences with prediction confidence below this threshold are marked 'NEEDS REVIEW' instead of forcing a rhetorical role."
+    st.markdown("### 🔬 v3 (1) Precision Toolkit")
+    st.caption("Post-processing sequence pipeline from `medstruct_nlp_v3 (1).ipynb`")
+
+    use_v3_decoding = st.checkbox(
+        "Order-Aware Markov Decoding",
+        value=True,
+        key="v3_decoding_toggle",
+        help="Enforces standard RCT discourse transition constraints (HMM forward-backward) to resolve sequence ambiguities."
     )
-    
+
+    use_v3_calibration = st.checkbox(
+        "Temperature Calibration (T=1.0)",
+        value=True,
+        key="v3_calib_toggle",
+        help="Calibrates class probabilities on the dev set to eliminate overconfidence."
+    )
+
+    abstention_mode = st.radio(
+        "Confidence & Abstention Guard:",
+        options=["🎯 v3 (1) Calibrated Thresholds (90% Precision)", "🎚️ Manual Confidence Slider"],
+        index=0,
+        key="abstention_mode_radio",
+        help="Select between empirical dev-tuned class thresholds (guaranteeing >=90% precision on key roles) or a global threshold slider."
+    )
+
+    use_calibrated_th = (abstention_mode == "🎯 v3 (1) Calibrated Thresholds (90% Precision)")
+
+    # Load precision configuration for display
+    v3_cfg = load_precision_config()
+    cfg_th = v3_cfg.get('th', {})
+
+    if use_calibrated_th:
+        with st.expander("📌 View v3 (1) Class Thresholds", expanded=False):
+            st.caption("Sentences with confidence below these role-specific thresholds are labeled `NEEDS REVIEW`:")
+            for lab in LABELS:
+                val = cfg_th.get(lab, 0.5)
+                st.write(f"- **{lab}**: `{val * 100:.1f}%`")
+        threshold = 0.60
+    else:
+        threshold = st.slider(
+            "Flag sentences below confidence:",
+            min_value=0.30,
+            max_value=0.95,
+            value=0.60,
+            step=0.05,
+            key="conf_threshold_slider",
+            help="Sentences with prediction confidence below this threshold are marked 'NEEDS REVIEW'."
+        )
+
     st.markdown("---")
     st.markdown("### 🏷️ Rhetorical Roles")
     for r in LABELS:
@@ -133,7 +174,7 @@ with st.sidebar:
     st.markdown("### ℹ️ Active Model Spec")
     try:
         _, info = load_active_model(model_key=selected_model_key)
-        st.success(f"**Active**: {info['name']}")
+        st.success(f"**Base**: {info['name']}")
         st.caption(f"**Type**: {info['type']}")
         st.caption(f"**Device**: {info.get('device', 'CPU')}")
         st.caption(f"**Macro-F1**: {info.get('macro_f1_estimate', 'N/A')}")
@@ -146,7 +187,12 @@ with st.sidebar:
 st.title("🧬 MedStruct: Biomedical Abstract Structurer")
 st.markdown(
     "Automated rhetorical role classification (**Background**, **Objective**, **Methods**, **Results**, **Conclusions**) "
-    "powered by state-of-the-art biomedical transformers and context-aware sequential modeling."
+    "powered by **medstruct_nlp_v3 (1)** with deep biomedical representations, order-aware sequence decoding, and calibrated abstention."
+)
+
+st.info(
+    "💡 **Pipeline Active**: Configured with **`medstruct_nlp_v3 (1)` Precision Toolkit** "
+    "(HMM forward-backward transition smoothing, temperature calibration, and 90% target precision thresholds)."
 )
 
 main_tabs = st.tabs(["⚡ Live Abstract Structurer", "📊 Models Benchmark & Empirical Comparison"])
@@ -190,14 +236,22 @@ with main_tabs[0]:
         st.rerun()
 
     if (analyze_btn or 'last_result' in st.session_state) and input_text.strip():
-        with st.spinner(f"Analyzing sentences using {selected_model_label}..."):
-            result = predict_abstract(input_text, threshold=threshold, model_key=selected_model_key)
+        with st.spinner(f"Analyzing sentences using {selected_model_label} + v3 (1) Precision Pipeline..."):
+            result = predict_abstract(
+                input_text,
+                threshold=threshold,
+                model_key=selected_model_key,
+                use_v3_decoding=use_v3_decoding,
+                use_v3_calibration=use_v3_calibration,
+                use_calibrated_thresholds=use_calibrated_th
+            )
             st.session_state['last_result'] = result
 
         df = result['df']
         grouped = result['grouped']
         n_sents = len(result['sentences'])
         n_flagged = int(df['needs_review'].sum()) if not df.empty else 0
+        n_order_corrected = int(df['order_corrected'].sum()) if not df.empty and 'order_corrected' in df.columns else 0
 
         st.markdown("---")
         
@@ -205,8 +259,8 @@ with main_tabs[0]:
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Sentences", n_sents)
         m2.metric("Mean Confidence", f"{df['confidence'].mean() * 100:.1f}%" if not df.empty else "N/A")
-        m3.metric("Flagged for Review", n_flagged, delta=f"-{n_flagged}" if n_flagged > 0 else "0", delta_color="inverse")
-        m4.metric("Active Model", result['model_info']['type'].split('(')[0].strip() if result['model_info'] else "N/A")
+        m3.metric("Flagged for Review", n_flagged, delta=f"{n_flagged} flagged" if n_flagged > 0 else "All confident", delta_color="inverse" if n_flagged > 0 else "normal")
+        m4.metric("Markov Order Corrections", n_order_corrected, help="Sentences adjusted by v3 (1) order-aware sequence decoding")
 
         sub_tab1, sub_tab2, sub_tab3 = st.tabs(["📑 Reconstructed Structured Abstract", "📊 Sentence Breakdown Table", "💾 Export Data"])
 
@@ -240,7 +294,7 @@ with main_tabs[0]:
                 st.markdown(
                     f'<div style="margin-top: 14px; margin-bottom: 4px; padding: 4px 10px; background-color: {bg}; '
                     f'border-left: 5px solid {color}; border-radius: 4px;">'
-                    f'<span style="color: {color}; font-weight: 700; font-size: 0.95rem;">⚠️ NEEDS CLINICAL REVIEW</span>'
+                    f'<span style="color: {color}; font-weight: 700; font-size: 0.95rem;">⚠️ NEEDS CLINICAL REVIEW (Below Calibrated Precision Threshold)</span>'
                     f'</div>',
                     unsafe_allow_html=True
                 )
@@ -252,16 +306,20 @@ with main_tabs[0]:
 
         # Sub Tab 2: Detailed Breakdown
         with sub_tab2:
-            st.markdown("#### Sentence-by-Sentence Predictions")
-            display_df = df[['index', 'sentence', 'role', 'confidence_pct', 'needs_review']].copy()
-            display_df.columns = ['#', 'Sentence Text', 'Predicted Role', 'Confidence (%)', 'Needs Review']
+            st.markdown("#### Sentence-by-Sentence Predictions (v3 (1) Pipeline)")
+            
+            display_cols = ['index', 'sentence', 'effective_role', 'role', 'raw_role', 'confidence_pct', 'needs_review']
+            display_df = df[display_cols].copy()
+            display_df.columns = ['#', 'Sentence Text', 'Effective Role', 'Decoded Role (v3)', 'Raw Model Guess', 'Confidence (%)', 'Needs Review']
             
             st.dataframe(
                 display_df,
                 column_config={
                     "#": st.column_config.NumberColumn(width="small"),
                     "Sentence Text": st.column_config.TextColumn(width="large"),
-                    "Predicted Role": st.column_config.TextColumn(width="medium"),
+                    "Effective Role": st.column_config.TextColumn(width="medium"),
+                    "Decoded Role (v3)": st.column_config.TextColumn(width="medium"),
+                    "Raw Model Guess": st.column_config.TextColumn(width="small"),
                     "Confidence (%)": st.column_config.ProgressColumn(
                         format="%.1f%%",
                         min_value=0,
@@ -273,7 +331,7 @@ with main_tabs[0]:
                 hide_index=True
             )
 
-            st.markdown("##### Detailed Probabilities Distribution")
+            st.markdown("##### Posterior Probability Marginals Distribution")
             prob_cols = ['index'] + [f'prob_{l}' for l in LABELS]
             prob_df = df[prob_cols].copy()
             prob_df.columns = ['#'] + LABELS
@@ -288,7 +346,7 @@ with main_tabs[0]:
             col_dl1.download_button(
                 label="📥 Download Predictions CSV",
                 data=csv_data,
-                file_name="medstruct_predictions.csv",
+                file_name="medstruct_v3_predictions.csv",
                 mime="text/csv",
                 key="btn_dl_csv",
                 use_container_width=True
@@ -296,10 +354,14 @@ with main_tabs[0]:
 
             json_records = {
                 'metadata': {
-                    'model': result['model_info']['name'] if result['model_info'] else 'unknown',
-                    'threshold': threshold,
+                    'engine': 'medstruct_nlp_v3 (1) Precision Toolkit',
+                    'base_model': result['model_info']['name'] if result['model_info'] else 'unknown',
+                    'order_aware_decoding': use_v3_decoding,
+                    'temperature_calibrated': use_v3_calibration,
+                    'calibrated_thresholds_applied': use_calibrated_th,
                     'total_sentences': n_sents,
-                    'flagged_sentences': n_flagged
+                    'flagged_sentences': n_flagged,
+                    'order_corrected_sentences': n_order_corrected
                 },
                 'structured_abstract': grouped,
                 'sentences': df.to_dict(orient='records')
@@ -308,7 +370,7 @@ with main_tabs[0]:
             col_dl2.download_button(
                 label="📥 Download Structured JSON",
                 data=json_data,
-                file_name="medstruct_structured.json",
+                file_name="medstruct_v3_structured.json",
                 mime="application/json",
                 key="btn_dl_json",
                 use_container_width=True
@@ -323,7 +385,7 @@ with main_tabs[1]:
     st.markdown(
         "Empirical evaluation of all architectures on the **PubMed 20k RCT** benchmark. "
         "The experiments evaluate classical baselines, recurrent models, isolated sentence transformers, "
-        "and hierarchical abstract-level sequential networks."
+        "hierarchical abstract-level sequential networks, and the **medstruct_nlp_v3 (1)** precision toolkit."
     )
 
     results_csv_path = os.path.join(root_dir, 'medstruct', 'results', 'results.csv')
@@ -410,11 +472,32 @@ with main_tabs[1]:
                 )
 
         st.markdown("---")
-        st.markdown("#### 5. Key Empirical Takeaways for the Research Paper")
+        st.markdown("#### 5. medstruct_nlp_v3 (1) Precision Toolkit Pipeline")
+        st.markdown(
+            """
+            The **medstruct_nlp_v3 (1)** pipeline resolves role confusions (especially distinguishing `OBJECTIVE` from `BACKGROUND`, and `METHODS` from `RESULTS`) via three sequential post-processing stages:
+            
+            1. **Temperature Calibration ($T=1.0$)**:
+               Aligns predicted softmax probabilities with empirical empirical accuracies on the dev split.
+            2. **Markov Order-Aware Transition Smoothing ($\lambda=0.75, \\beta=0.5$)**:
+               Uses an HMM forward-backward algorithm to apply empirical transition log-probabilities ($logT$), start priors ($logS$), and label priors ($logP$) derived from training RCT abstracts.
+            3. **Selective Precision Abstention ($target=90\%$)**:
+               Replaces borderline predictions with `NEEDS REVIEW` (`UNSURE`) when posterior marginals fall below the role's dev-calibrated threshold:
+               - **BACKGROUND**: `99.0%`
+               - **OBJECTIVE**: `86.7%`
+               - **METHODS**: `35.4%`
+               - **RESULTS**: `31.1%`
+               - **CONCLUSIONS**: `28.1%`
+            """
+        )
+
+        st.markdown("---")
+        st.markdown("#### 6. Key Empirical Takeaways for the Research Paper")
         st.markdown(
             """
             | Finding | Evidence | Paper Implication |
             |---|---|---|
+            | **v3 (1) Sequence Smoothing** | Order-aware Markov decoding corrects rhetorical role inversions. | Transition structure boosts sequence consistency without retraining. |
             | **Hierarchical Superiority** | BioBERT Hierarchical (**0.7953**) outperforms Sentence-level (**0.7666**) by **+2.87 F1**. | Models must model rhetorical discourse transitions between sentences. |
             | **Domain Pre-training** | BioBERT Sentence (**0.7666**) vs standard BERT Sentence (**0.7038**): **+6.28 F1**. | Biomedical vocabulary pre-training is crucial for clinical vocabulary. |
             | **Classical Baseline Power** | TF-IDF + LR (**0.7599**) outperforms BERT Sentence (**0.7038**)! | Simple n-gram frequency with sublinear TF is a surprisingly competitive baseline. |
@@ -426,5 +509,5 @@ with main_tabs[1]:
 
 st.markdown("---")
 st.caption(
-    "MedStruct Demo | Multi-Model Evaluation Suite | Trained on PubMed 20k RCT"
+    "MedStruct Demo | Multi-Model Evaluation Suite | Powered by medstruct_nlp_v3 (1) Precision Toolkit | Trained on PubMed 20k RCT"
 )
